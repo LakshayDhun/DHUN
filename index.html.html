@@ -555,7 +555,13 @@ let lufsOriginal=null;
 const EQ_FREQS=[60,250,1000,8000,16000];
 const EQ_TYPES=['lowshelf','peaking','peaking','peaking','highshelf'];
 const eqGains=[0,0,0,0,0];
-const compP={threshold:-18,ratio:4,attack:0.01,release:0.2,knee:2};
+
+// ── FIX 3: Industry standard mastering compressor settings ──
+// Slow attack lets transients through naturally
+// Slow release prevents pumping/breathing
+// Low ratio = gentle transparent compression
+// Soft knee = gradual onset, not sudden squash
+const compP={threshold:-18,ratio:2.5,attack:0.03,release:0.4,knee:8};
 
 function initCtx(){
   if(audioCtx)return;
@@ -565,27 +571,51 @@ function initCtx(){
     f.type=EQ_TYPES[i];f.frequency.value=freq;f.gain.value=0;f.Q.value=1;return f;
   });
   compNode=audioCtx.createDynamicsCompressor();
-  compNode.threshold.value=-18;compNode.ratio.value=4;
-  compNode.attack.value=0.01;compNode.release.value=0.2;compNode.knee.value=2;
+  // Apply industry standard settings
+  compNode.threshold.value=compP.threshold;
+  compNode.ratio.value=compP.ratio;
+  compNode.attack.value=compP.attack;
+  compNode.release.value=compP.release;
+  compNode.knee.value=compP.knee;
   gainNode=audioCtx.createGain();gainNode.gain.value=0.85;
   analyser=audioCtx.createAnalyser();analyser.fftSize=512;analyser.smoothingTimeConstant=0.8;
   freqData=new Uint8Array(analyser.frequencyBinCount);
+  // Build processing chain: EQ → Comp → Gain → Analyser → Output
   for(let i=0;i<eqNodes.length-1;i++)eqNodes[i].connect(eqNodes[i+1]);
-  eqNodes[eqNodes.length-1].connect(compNode);compNode.connect(gainNode);
-  gainNode.connect(analyser);analyser.connect(audioCtx.destination);
+  eqNodes[eqNodes.length-1].connect(compNode);
+  compNode.connect(gainNode);
+  gainNode.connect(analyser);
+  analyser.connect(audioCtx.destination);
 }
 
 function setEQ(i,v){eqGains[i]=+v;if(eqNodes[i])eqNodes[i].gain.setTargetAtTime(+v,audioCtx.currentTime,0.01);}
 function setComp(p,v){compP[p]=+v;if(!compNode)return;const m={threshold:compNode.threshold,ratio:compNode.ratio,attack:compNode.attack,release:compNode.release,knee:compNode.knee};if(m[p])m[p].setTargetAtTime(+v,audioCtx.currentTime,0.01);}
 function setVol(v){if(gainNode)gainNode.gain.setTargetAtTime(+v,audioCtx.currentTime,0.01);}
 
+// ── FIX 1: Bypass processing on A mode (original) ──
+// A mode = raw audio, no EQ/compression — true original sound
+// B mode = full processing chain
 function connectAndPlay(buf,offset){
   if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){}}
   sourceNode=audioCtx.createBufferSource();
-  sourceNode.buffer=buf;sourceNode.connect(eqNodes[0]);
-  sourceNode.start(0,Math.max(0,Math.min(offset,buf.duration-0.01)));
-  startedAt=audioCtx.currentTime-offset;isPlaying=true;
-  sourceNode.onended=()=>{if(isPlaying){isPlaying=false;pausedAt=0;syncUI();}};
+  sourceNode.buffer=buf;
+
+  if(abMode==='A'){
+    // BYPASS — connect directly to analyser, skip EQ and compressor entirely
+    sourceNode.connect(analyser);
+  } else {
+    // PROCESSED — go through full chain
+    sourceNode.connect(eqNodes[0]);
+  }
+
+  const safeOffset=Math.max(0,Math.min(offset,buf.duration-0.01));
+  sourceNode.start(0,safeOffset);
+  // ── FIX 2: Store precise startedAt so seek bar never drifts ──
+  startedAt=audioCtx.currentTime-safeOffset;
+  isPlaying=true;
+  sourceNode.onended=()=>{
+    if(isPlaying){isPlaying=false;pausedAt=0;syncUI();}
+  };
   syncUI();
 }
 
@@ -594,6 +624,7 @@ function togglePlay(){
   if(!audioCtx)initCtx();
   if(audioCtx.state==='suspended')audioCtx.resume();
   if(isPlaying){
+    // Save exact position before pausing
     pausedAt=Math.max(0,audioCtx.currentTime-startedAt);
     if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
     audioCtx.suspend();isPlaying=false;syncUI();
@@ -607,7 +638,7 @@ function togglePlay(){
 function stopTrack(){
   if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
   if(audioCtx)audioCtx.suspend();
-  isPlaying=false;pausedAt=0;
+  isPlaying=false;pausedAt=0;startedAt=0;
   document.getElementById('progressFill').style.width='0%';
   document.getElementById('timeCurrent').textContent='0:00';
   syncUI();
@@ -616,14 +647,20 @@ function stopTrack(){
 function setAB(mode){
   if(abMode===mode)return;
   const wasPlaying=isPlaying;
+  // Save exact current position before switching
   const offset=isPlaying?Math.max(0,audioCtx.currentTime-startedAt):pausedAt;
   if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
   isPlaying=false;abMode=mode;
   document.getElementById('btnA').classList.toggle('active',mode==='A');
   document.getElementById('btnB').classList.toggle('active',mode==='B');
   updateStatsView(mode);
-  if(wasPlaying){if(audioCtx.state==='suspended')audioCtx.resume();const buf=(mode==='B'&&processedBuffer)?processedBuffer:audioBuffer;connectAndPlay(buf,offset);}
-  else{pausedAt=offset;syncUI();}
+  if(wasPlaying){
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    const buf=(mode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
+    connectAndPlay(buf,offset);
+  } else {
+    pausedAt=offset;syncUI();
+  }
 }
 
 function updateStatsView(mode){
@@ -640,8 +677,15 @@ function seekClick(e){
   const ratio=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
   const buf=(abMode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
   const newOffset=ratio*buf.duration;
-  if(isPlaying)connectAndPlay(buf,newOffset);
-  else{pausedAt=newOffset;document.getElementById('progressFill').style.width=(ratio*100)+'%';document.getElementById('timeCurrent').textContent=fmt(newOffset);}
+  // ── FIX 2: Always update pausedAt so timer is correct whether playing or not ──
+  pausedAt=newOffset;
+  document.getElementById('progressFill').style.width=(ratio*100).toFixed(2)+'%';
+  document.getElementById('timeCurrent').textContent=fmt(newOffset);
+  if(isPlaying){
+    // Restart from new position — startedAt recalculated inside connectAndPlay
+    if(audioCtx.state==='suspended')audioCtx.resume();
+    connectAndPlay(buf,newOffset);
+  }
 }
 
 function syncUI(){
@@ -1013,8 +1057,12 @@ async function renderOffline(settings){
     f.gain.value=i===3?settings.clarity*.12:i===4?settings.clarity*.08:0;f.Q.value=1;return f;
   });
   const offComp=off.createDynamicsCompressor();
-  offComp.threshold.value=-60+(settings.loudness*.42);offComp.ratio.value=1+(settings.loudness*.09);
-  offComp.attack.value=0.01;offComp.release.value=0.2;offComp.knee.value=2;
+  // Industry standard mastering compression — transparent, no pumping
+  offComp.threshold.value=-18;
+  offComp.ratio.value=2.5;      // gentle 2.5:1
+  offComp.attack.value=0.03;    // 30ms — lets transients through
+  offComp.release.value=0.4;    // 400ms — slow release, no pumping
+  offComp.knee.value=8;         // soft knee — gradual onset
   const offLim=off.createDynamicsCompressor();
   offLim.threshold.value=-1;offLim.ratio.value=20;offLim.attack.value=0.001;offLim.release.value=0.05;
   const makeupDb=3+(settings.loudness*.08);
