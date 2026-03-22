@@ -131,11 +131,23 @@ input.vol::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;b
 .hint-chip:hover{border-color:var(--purple);color:var(--purple);}
 
 /* APPLY & MIX BUTTON */
-.apply-mix-btn{width:100%;padding:16px;border-radius:12px;border:none;background:linear-gradient(135deg,#1a1a35,#0d0d25);border:1.5px solid var(--purple);color:#fff;font-family:'Rajdhani',sans-serif;font-weight:700;font-size:15px;letter-spacing:2px;cursor:pointer;transition:all .25s;margin-bottom:16px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 0 20px rgba(123,95,255,0.2);}
-.apply-mix-btn:hover{background:linear-gradient(135deg,#2a1a55,#1a0d45);box-shadow:0 0 32px rgba(123,95,255,0.5);transform:translateY(-1px);}
-.apply-mix-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;}
-.apply-mix-btn.processing{background:linear-gradient(135deg,var(--purple),#a855ff);box-shadow:0 0 30px rgba(123,95,255,0.6);}
-.apply-mix-icon{font-size:18px;}
+.apply-mix-btn{
+  width:100%;padding:0;border-radius:14px;border:none;
+  background:linear-gradient(135deg,#7b5fff,#a855ff);
+  color:#fff;cursor:pointer;transition:all .25s;
+  margin-bottom:16px;display:flex;align-items:stretch;
+  overflow:hidden;box-shadow:0 4px 24px rgba(123,95,255,0.4);
+}
+.apply-mix-btn:hover{box-shadow:0 6px 32px rgba(123,95,255,0.6);transform:translateY(-2px);}
+.apply-mix-btn:disabled{opacity:.4;cursor:not-allowed;transform:none;box-shadow:none;}
+.apply-mix-btn.processing{background:linear-gradient(135deg,#5a3fd4,#8a35d4);animation:glowPulse 1s infinite;}
+@keyframes glowPulse{0%,100%{box-shadow:0 4px 24px rgba(123,95,255,0.4)}50%{box-shadow:0 4px 40px rgba(123,95,255,0.8)}}
+.amb-left{padding:16px 20px;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,0.15);flex-shrink:0;}
+.amb-icon{font-size:24px;}
+.amb-right{flex:1;padding:14px 16px;text-align:center;display:flex;flex-direction:column;justify-content:center;align-items:center;}
+.amb-title{font-family:'Orbitron',monospace;font-size:13px;font-weight:700;letter-spacing:1px;margin-bottom:2px;}
+.amb-sub{font-size:11px;opacity:.75;letter-spacing:.3px;}
+.amb-arrow{padding:16px 18px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
 
 /* EXPORT */
 .export-section{margin-bottom:16px;}
@@ -244,13 +256,31 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
         <button class="ab-btn" id="btnB" onclick="setAB('B')">B  PROCESSED</button>
       </div>
     </div>
-    <div class="lufs-display">
-      <div>
-        <div class="lufs-val" id="lufsVal" style="color:var(--amber)">— LUFS</div>
-        <div class="lufs-label">LOUDNESS</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <!-- A LUFS -->
+      <div class="lufs-display">
+        <div>
+          <div class="lufs-val" id="lufsValA" style="color:var(--amber)">— LUFS</div>
+          <div class="lufs-label">ORIGINAL</div>
+        </div>
       </div>
-      <div class="lufs-target" id="lufsTarget" style="background:rgba(245,166,35,0.1);color:var(--amber);border:1px solid rgba(245,166,35,0.3);font-size:9px;padding:2px 8px;border-radius:4px;font-weight:600;">Target: -14</div>
+      <!-- Arrow -->
+      <div style="font-size:16px;color:var(--text3)">→</div>
+      <!-- B LUFS -->
+      <div class="lufs-display" id="lufsDisplayB" style="opacity:.4">
+        <div>
+          <div class="lufs-val" id="lufsValB" style="color:var(--text3)">— LUFS</div>
+          <div class="lufs-label">PROCESSED</div>
+        </div>
+        <div class="lufs-target" id="lufsTarget" style="background:rgba(245,166,35,0.1);color:var(--amber);border:1px solid rgba(245,166,35,0.3);font-size:9px;padding:2px 8px;border-radius:4px;font-weight:600;display:none">—</div>
+      </div>
     </div>
+  </div>
+
+  <!-- BEFORE / AFTER STATS CARD -->
+  <div id="statsCard" style="display:none;background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px;">
+    <div style="font-size:10px;letter-spacing:2px;color:var(--purple);text-transform:uppercase;font-weight:700;margin-bottom:12px;" id="statsCardHeader">Before / After Results</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;" id="statsGrid"></div>
   </div>
 
   <!-- TRANSPORT -->
@@ -321,8 +351,12 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
   <!-- APPLY & MIX BUTTON -->
   <button class="apply-mix-btn" id="applyMixBtn" style="display:none" onclick="applyAndMix()" disabled>
-    <span class="apply-mix-icon">🎛</span>
-    APPLY & MIX — Process with my settings
+    <div class="amb-left"><span class="amb-icon">🎛</span></div>
+    <div class="amb-right">
+      <div class="amb-title" id="applyMixTitle">APPLY & MIX</div>
+      <div class="amb-sub" id="applyMixSub">Process with your current settings → ready to export</div>
+    </div>
+    <div class="amb-arrow">→</div>
   </button>
 
   <!-- EXPORT TARGETS -->
@@ -469,13 +503,13 @@ function setAB(mode){
   if(abMode===mode)return;
   const wasPlaying=isPlaying;
   const currentOffset=isPlaying?(audioCtx.currentTime-startedAt):pausedAt;
-  // Stop current playback
   if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
   isPlaying=false;
   abMode=mode;
   document.getElementById('btnA').classList.toggle('active',mode==='A');
   document.getElementById('btnB').classList.toggle('active',mode==='B');
-  // Resume on correct buffer if was playing
+  // Update stats card view
+  updateStatsCardView(mode);
   if(wasPlaying){
     if(audioCtx.state==='suspended')audioCtx.resume();
     const buf=(mode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
@@ -542,7 +576,7 @@ function loadFile(file){
       document.getElementById('autoMixBtn').disabled=false;
       document.getElementById('exportBtn').disabled=false;
       document.getElementById('applyMixBtn').disabled=false;
-      drawWaveform(buf);showUI();estimateLUFS(buf);runAIAnalysis(buf);
+      drawWaveform(buf);showUI();estimateLUFS(buf,false);runAIAnalysis(buf);
     },()=>showErr('Could not decode audio. Try another file.'));
   };
   reader.readAsArrayBuffer(file);
@@ -584,23 +618,121 @@ function drawWaveform(buf){
 }
 
 // ══════════════════════════════════════════
-//  LUFS
+//  LUFS — separate for A (original) and B (processed)
 // ══════════════════════════════════════════
-function estimateLUFS(buf){
+let lufsOriginal=null;
+
+function calcLUFS(buf){
   const data=buf.getChannelData(0);let sum=0;
   for(let i=0;i<data.length;i++)sum+=data[i]*data[i];
   const rms=Math.sqrt(sum/data.length);
-  const lufs=Math.round(20*Math.log10(Math.max(rms,0.0001)));
-  const el=document.getElementById('lufsVal');
-  el.textContent=lufs+' LUFS';
-  el.style.color=lufs>-10?'#ff5f7b':lufs>-16?'#00e5a0':'#f5a623';
-  const diff=-14-lufs;
-  document.getElementById('lufsTarget').textContent=
-    diff>0?`+${diff}dB needed`:diff<0?`${Math.abs(diff)}dB over`:'✓ Spotify ready';
+  return Math.round(20*Math.log10(Math.max(rms,0.0001)));
+}
+
+function estimateLUFS(buf,isProcessed=false){
+  const lufs=calcLUFS(buf);
+  if(!isProcessed){
+    // Original
+    lufsOriginal=lufs;
+    const el=document.getElementById('lufsValA');
+    el.textContent=lufs+' LUFS';
+    el.style.color=lufs>-10?'#ff5f7b':lufs>-16?'#00e5a0':'#f5a623';
+  } else {
+    // Processed — update B display
+    const elB=document.getElementById('lufsValB');
+    elB.textContent=lufs+' LUFS';
+    elB.style.color=lufs>-10?'#ff5f7b':lufs>-14?'#00e5a0':'#f5a623';
+    const tgt=document.getElementById('lufsTarget');
+    const diff=-14-lufs;
+    tgt.style.display='block';
+    tgt.textContent=diff>0?`+${diff}dB needed`:diff<0?`${Math.abs(diff)}dB over`:'✓ Spotify ready';
+    tgt.style.background=diff===0?'rgba(0,229,160,0.1)':'rgba(245,166,35,0.1)';
+    tgt.style.color=diff===0?'var(--green)':'var(--amber)';
+    tgt.style.borderColor=diff===0?'rgba(0,229,160,0.3)':'rgba(245,166,35,0.3)';
+    document.getElementById('lufsDisplayB').style.opacity='1';
+    showStatsCard(lufsOriginal,lufs);
+  }
 }
 
 // ══════════════════════════════════════════
-//  AI ANALYSIS
+//  BEFORE / AFTER STATS CARD
+// ══════════════════════════════════════════
+function showStatsCard(lufsA,lufsB){
+  const card=document.getElementById('statsCard');
+  const grid=document.getElementById('statsGrid');
+  const lufsImprove=lufsB-lufsA;
+  const lufsGood=lufsImprove>0;
+  const stats=[
+    {
+      label:'Loudness',
+      before:lufsA+' LUFS',
+      after:lufsB+' LUFS',
+      delta:(lufsImprove>0?'+':'')+lufsImprove+' LUFS',
+      good:lufsGood,
+      icon:'📊'
+    },
+    {
+      label:'Clarity',
+      before:'—',
+      after:'+'+Math.round(knobVals.clarity*.12)+' dB',
+      delta:'EQ applied',
+      good:true,
+      icon:'✨'
+    },
+    {
+      label:'Noise',
+      before:'—',
+      after:'-'+Math.round(knobVals.noiseClean*.5)+' dB',
+      delta:'Gate active',
+      good:true,
+      icon:'🧹'
+    },
+    {
+      label:'Spotify Ready',
+      before:'No',
+      after:lufsB>=-16&&lufsB<=-11?'Yes':'Almost',
+      delta:lufsB>=-16&&lufsB<=-11?'✓ Ready':'Boost more',
+      good:lufsB>=-16&&lufsB<=-11,
+      icon:'🎵'
+    },
+  ];
+  grid.innerHTML=stats.map(s=>`
+    <div style="background:var(--bg3);border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:18px;margin-bottom:6px">${s.icon}</div>
+      <div style="font-size:10px;color:var(--text2);letter-spacing:.5px;margin-bottom:6px;text-transform:uppercase">${s.label}</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px;">
+        <span style="font-size:11px;color:var(--text3);text-decoration:line-through">${s.before}</span>
+        <span style="font-size:10px;color:var(--text3)">→</span>
+        <span style="font-size:12px;font-weight:700;color:${s.good?'var(--green)':'var(--amber)'}">${s.after}</span>
+      </div>
+      <div style="font-size:10px;padding:2px 8px;border-radius:10px;display:inline-block;
+        background:${s.good?'rgba(0,229,160,0.1)':'rgba(245,166,35,0.1)'};
+        color:${s.good?'var(--green)':'var(--amber)'};
+        border:1px solid ${s.good?'rgba(0,229,160,0.3)':'rgba(245,166,35,0.3)'}">
+        ${s.delta}
+      </div>
+    </div>`).join('');
+  card.style.display='block';
+  card.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// Toggle stats card view based on A/B mode
+function updateStatsCardView(mode){
+  const card=document.getElementById('statsCard');
+  if(!card||card.style.display==='none')return;
+  const header=document.getElementById('statsCardHeader');
+  if(mode==='A'){
+    // Dim — show "before" state only
+    card.style.opacity='0.45';
+    card.style.filter='grayscale(50%)';
+    if(header)header.textContent='Before Results — switch to B PROCESSED to see improvements';
+  } else {
+    // Full comparison visible
+    card.style.opacity='1';
+    card.style.filter='none';
+    if(header)header.textContent='Before / After Results';
+  }
+}
 // ══════════════════════════════════════════
 const AI_DB=[
   {color:'#ff5f7b',text:'High peak detected — limiter recommended',fix:'Auto Mix will apply transparent limiting at -0.3 dBTP'},
@@ -795,7 +927,9 @@ async function applyAndMix(){
   if(!audioBuffer)return;
   const btn=document.getElementById('applyMixBtn');
   btn.classList.add('processing');
-  btn.textContent='⏳ Processing with your settings...';
+  btn.disabled=true;
+  document.getElementById('applyMixTitle').textContent='PROCESSING...';
+  document.getElementById('applyMixSub').textContent='Applying your settings to the audio...';
   const ov=document.getElementById('processingOverlay');
   const bar=document.getElementById('processingBar');
   const step=document.getElementById('processingStep');
@@ -806,17 +940,19 @@ async function applyAndMix(){
   try{processedBuffer=await renderOffline(knobVals);}catch(e){console.error(e);}
   ov.classList.remove('open');
   btn.classList.remove('processing');
-  btn.innerHTML='<span class="apply-mix-icon">✓</span> Mix Applied! Hit Export to Download';
-  btn.style.borderColor='var(--green)';
+  btn.disabled=false;
+  document.getElementById('applyMixTitle').textContent='✓ MIX APPLIED';
+  document.getElementById('applyMixSub').textContent='Switch to B Processed to hear it — then Export below';
+  btn.style.background='linear-gradient(135deg,#00b377,#00e5a0)';
   document.getElementById('exportBtn').disabled=false;
   document.getElementById('exportSocialBtn').disabled=false;
-  // Switch to B (processed) automatically
   processedBuffer&&setAB('B');
-  estimateLUFS(processedBuffer||audioBuffer);
+  if(processedBuffer)estimateLUFS(processedBuffer,true);
   setTimeout(()=>{
-    btn.innerHTML='<span class="apply-mix-icon">🎛</span> APPLY & MIX — Process with my settings';
-    btn.style.borderColor='var(--purple)';
-  },4000);
+    document.getElementById('applyMixTitle').textContent='APPLY & MIX';
+    document.getElementById('applyMixSub').textContent='Process with your current settings → ready to export';
+    btn.style.background='linear-gradient(135deg,#7b5fff,#a855ff)';
+  },5000);
 }
 
 // ══════════════════════════════════════════
@@ -849,7 +985,7 @@ async function runAutoMix(){
   document.getElementById('exportBtn').disabled=false;
   document.getElementById('exportSocialBtn').disabled=false;
   processedBuffer&&setAB('B');
-  estimateLUFS(processedBuffer||audioBuffer);
+  if(processedBuffer)estimateLUFS(processedBuffer,true);
   setTimeout(()=>{
     document.getElementById('autoMixBtn').querySelector('.auto-mix-desc').textContent='DHUN decides everything — one click, professional result';
   },5000);
@@ -872,7 +1008,10 @@ async function renderOffline(settings){
   offComp.attack.value=0.01;offComp.release.value=0.2;offComp.knee.value=2;
   const offLim=off.createDynamicsCompressor();
   offLim.threshold.value=-1;offLim.ratio.value=20;offLim.attack.value=0.001;offLim.release.value=0.05;
-  const offG=off.createGain();offG.gain.value=1;
+  // Makeup gain — ensures processed is always louder than original
+  const makeupDb=3+(settings.loudness*.08); // 3 to 11 dB boost
+  const offG=off.createGain();
+  offG.gain.value=Math.pow(10,makeupDb/20);
   for(let i=0;i<offEQ.length-1;i++)offEQ[i].connect(offEQ[i+1]);
   offEQ[offEQ.length-1].connect(offComp);offComp.connect(offLim);offLim.connect(offG);offG.connect(off.destination);
   const src=off.createBufferSource();src.buffer=audioBuffer;src.connect(offEQ[0]);src.start(0);
