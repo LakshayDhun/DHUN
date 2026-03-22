@@ -677,14 +677,18 @@ function seekClick(e){
   const ratio=Math.max(0,Math.min(1,(e.clientX-rect.left)/rect.width));
   const buf=(abMode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
   const newOffset=ratio*buf.duration;
-  // ── FIX 2: Always update pausedAt so timer is correct whether playing or not ──
   pausedAt=newOffset;
+  // Update UI immediately so it never freezes
   document.getElementById('progressFill').style.width=(ratio*100).toFixed(2)+'%';
   document.getElementById('timeCurrent').textContent=fmt(newOffset);
   if(isPlaying){
-    // Restart from new position — startedAt recalculated inside connectAndPlay
-    if(audioCtx.state==='suspended')audioCtx.resume();
-    connectAndPlay(buf,newOffset);
+    // Stop current source
+    if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
+    isPlaying=false;
+    // Resume context first, THEN start new source so currentTime is accurate
+    audioCtx.resume().then(()=>{
+      connectAndPlay(buf,newOffset);
+    });
   }
 }
 
@@ -1163,14 +1167,17 @@ for(let i=0;i<48;i++){const b=document.createElement('div');b.className='wph-bar
 // ══════════════════════════════════════════
 function animate(){
   requestAnimationFrame(animate);
-  if(isPlaying&&analyser&&freqData&&audioBuffer&&audioCtx){
-    analyser.getByteFrequencyData(freqData);
-    const el=Math.max(0,audioCtx.currentTime-startedAt);
-    const buf=(abMode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
-    const ratio=Math.min(1,el/buf.duration);
-    document.getElementById('progressFill').style.width=(ratio*100).toFixed(2)+'%';
-    document.getElementById('timeCurrent').textContent=fmt(el);
-  }
+  if(!isPlaying||!audioBuffer||!audioCtx)return;
+  // Only update when context is actually running
+  if(audioCtx.state!=='running')return;
+  const elapsed=Math.max(0,audioCtx.currentTime-startedAt);
+  const buf=(abMode==='B'&&processedBuffer)?processedBuffer:audioBuffer;
+  const duration=buf.duration;
+  // Cap at duration so it never overshoots
+  const capped=Math.min(elapsed,duration);
+  const ratio=capped/duration;
+  document.getElementById('progressFill').style.width=(ratio*100).toFixed(2)+'%';
+  document.getElementById('timeCurrent').textContent=fmt(capped);
 }
 
 buildKnobs();buildPresets();buildExportTargets();animate();
