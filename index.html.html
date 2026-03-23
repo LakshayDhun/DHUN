@@ -280,11 +280,11 @@ input.vol::-webkit-slider-thumb{-webkit-appearance:none;width:11px;height:11px;b
   <div class="upload-zone" id="uploadZone">
     <div class="upload-icon-wrap">🎧</div>
     <h3>Drop your track here</h3>
-    <p>Supports .mp3 and .wav · Max 100 MB</p>
+    <p>Supports .mp3, .wav and .mpeg · Max 100 MB</p>
     <button class="btn-upload" onclick="event.stopPropagation();document.getElementById('fileInput').click()">↑ Upload Track</button>
     <div class="upload-err" id="uploadErr" style="display:none"></div>
   </div>
-  <input type="file" id="fileInput" accept=".mp3,.wav,audio/mpeg,audio/wav" style="display:none">
+  <input type="file" id="fileInput" accept=".mp3,.wav,.mpeg,audio/mpeg,audio/wav,audio/mp3,video/mpeg" style="display:none">
 
   <!-- TRACK CARD -->
   <div class="track-card" id="trackCard" style="display:none">
@@ -573,10 +573,13 @@ function syncUI(){
 const fmt=s=>`${Math.floor(Math.max(0,s)/60)}:${String(Math.floor(Math.max(0,s)%60)).padStart(2,'0')}`;
 
 // ══ LOAD FILE ══
-const VALID=['audio/mpeg','audio/wav','audio/wave','audio/x-wav'];
+const VALID=['audio/mpeg','audio/wav','audio/wave','audio/x-wav','video/mpeg','audio/mp3','audio/x-mpeg','audio/x-mp3'];
 function loadFile(file){
   if(!file)return;
-  if(!VALID.includes(file.type)){showErr('Only .mp3 and .wav files are supported.');return;}
+  // Check by MIME type OR by file extension — WhatsApp saves as .mp3.mpeg
+  const validType=VALID.includes(file.type);
+  const validExt=/\.(mp3|wav|mpeg|mp4a)$/i.test(file.name);
+  if(!validType&&!validExt){showErr('Only .mp3, .wav and .mpeg files are supported.');return;}
   if(file.size>100*1024*1024){showErr('File too large. Max 100 MB.');return;}
   hideErr();if(!audioCtx)initCtx();if(audioCtx.state==='suspended')audioCtx.resume();
   stopTrack();hasFile=false;processedBuffer=null;abMode='A';
