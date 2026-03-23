@@ -710,23 +710,45 @@ function runAnalysis(buf,isProcessed){
   for(let i=0;i<data.length;i++){const v=Math.abs(data[i]);if(v>peak)peak=v;sum+=v*v;}
   const rms=Math.sqrt(sum/data.length);
   const results=[];
-  if(peak>0.9)results.push(INSIGHTS[0]);
-  if(rms>0.08)results.push(INSIGHTS[1]);
-  if(!isProcessed)results.push(INSIGHTS[2]);// stereo only shows on original
-  if(rms<0.3)results.push(INSIGHTS[3]);
-  results.push(INSIGHTS[4]);
-  if(rms<0.05)results.push(INSIGHTS[5]);
+
+  if(isProcessed){
+    // After processing — fewer issues because we applied fixes
+    // Peak: limiter was applied, only flag if still severely clipping
+    if(peak>0.97)results.push(INSIGHTS[0]);
+    // Mud: only flag if clarity knob is still very low
+    if(rms>0.08&&knobVals.clarity<35)results.push(INSIGHTS[1]);
+    // Dynamic range
+    if(rms<0.3)results.push(INSIGHTS[3]);
+    // Air: only flag if clarity is low
+    if(knobVals.clarity<40)results.push(INSIGHTS[4]);
+    // Noise: only flag if noiseClean is low
+    if(rms<0.05&&knobVals.noiseClean<20)results.push(INSIGHTS[5]);
+  } else {
+    // Original audio — full analysis, show all issues
+    if(peak>0.9)results.push(INSIGHTS[0]);
+    if(rms>0.08)results.push(INSIGHTS[1]);
+    results.push(INSIGHTS[2]); // stereo always narrow on original
+    if(rms<0.3)results.push(INSIGHTS[3]);
+    results.push(INSIGHTS[4]);
+    if(rms<0.05)results.push(INSIGHTS[5]);
+  }
+
   const issues=results.filter(r=>r.fix).length;
-  const newScore=Math.max(40,Math.min(100,isProcessed?Math.min(95,100-issues*8):100-issues*12));
-  const titles={40:'Needs Work',60:'Developing',72:'Good Foundation',85:'Strong Track',95:'Excellent'};
-  const titleKey=Object.keys(titles).reverse().find(k=>newScore>=+k);
-  const title=titles[titleKey]||'Analysing';
-  const desc=issues===0?'Your track is well balanced and ready to master.':`${issues} issue${issues>1?'s':''} holding back your track. Fix them for a professional master.`;
+  // Processed always scores higher — reflects the improvements made
+  const newScore=isProcessed
+    ?Math.min(98,Math.max(78,95-issues*5+(knobVals.clarity>55?4:0)+(knobVals.loudness>45?4:0)+(knobVals.noiseClean>25?3:0)))
+    :Math.max(40,100-issues*12);
+
+  const scoreTitle=newScore>=90?'Excellent':newScore>=80?'Strong Track':newScore>=65?'Good Foundation':'Needs Work';
+  const desc=isProcessed
+    ?(issues===0?'Your track is professionally mastered and ready to publish.':`${issues} minor issue${issues>1?'s':''} remaining. Another pass could get it to 95+.`)
+    :(issues===0?'Your track is well balanced.':`${issues} issue${issues>1?'s':''} holding back your track. Fix them for a professional master.`);
+
   animateScore(currentScore,newScore);
   currentScore=newScore;
-  document.getElementById('scoreTitle').textContent=title;
+  document.getElementById('scoreTitle').textContent=scoreTitle;
   document.getElementById('scoreDesc').textContent=desc;
-  document.getElementById('insightList').innerHTML=results.slice(0,4).map((r,idx)=>`
+  document.getElementById('insightList').innerHTML=results.slice(0,4).map(r=>`
     <div class="insight-item">
       <div class="insight-dot ${r.dot}"></div>
       <div class="insight-body">
@@ -874,22 +896,38 @@ async function applyAndMix(){
   if(!audioBuffer)return;
   const btn=document.getElementById('btnApplyMix');
   btn.disabled=true;btn.textContent='⏳ Processing...';
-  await processAudio(knobVals,'APPLYING MIX');
+  // Always use current knobVals — includes any auto-fix changes
+  await processAudio({...knobVals},'APPLYING MIX');
   btn.disabled=false;btn.textContent='🎛 Apply & Mix';
 }
 
-// ══ AUTO MIX ══
+// ══ AUTO MIX — merges prompt settings INTO knobVals so auto-fix is respected ══
 async function runAutoMix(){
   if(!audioBuffer)return;
   const btn=document.getElementById('btnAutoMix');
   btn.disabled=true;btn.textContent='⏳ Processing...';
-  const settings=parsePromptSettings();
-  await processAudio(settings,'AUTO MIX');
+  // Get prompt-based settings
+  const promptSettings=parsePromptSettings();
+  // Merge with current knobVals — prompt overrides defaults but keeps auto-fix changes
+  // If user typed something specific, use that. Otherwise use current knobVals.
+  const text=document.getElementById('autoPromptInput').value.trim();
+  const finalSettings=text?promptSettings:{...knobVals};
+  // Apply the final settings to knobs so user can see what was used
+  Object.entries(finalSettings).forEach(([k,v])=>updateKnob(k,v));
+  await processAudio(finalSettings,'AUTO MIX');
   btn.disabled=false;btn.textContent='⚡ Auto Mix Now';
 }
 
 // ══ SHARED PROCESS ══
 async function processAudio(settings,title){
+  // ── Fully stop playback before processing ──
+  if(sourceNode){try{sourceNode.disconnect();sourceNode.stop();}catch(e){} sourceNode=null;}
+  if(audioCtx)audioCtx.suspend();
+  isPlaying=false;pausedAt=0;startedAt=0;
+  document.getElementById('progressFill').style.width='0%';
+  document.getElementById('timeCurrent').textContent='0:00';
+  syncUI();
+
   document.getElementById('processingTitle').textContent=title;
   const ov=document.getElementById('processingOverlay');ov.classList.add('open');
   const steps=[[10,'Analysing signal...'],[25,'Applying EQ...'],[45,'Compressing dynamics...'],[65,'Adding depth...'],[82,'LUFS targeting...'],[95,'Limiting...'],[100,'Done!']];
@@ -900,17 +938,29 @@ async function processAudio(settings,title){
   }
   try{processedBuffer=await renderOffline(settings);}catch(e){console.error(e);}
   ov.classList.remove('open');
+  document.getElementById('processingBar').style.width='0%';
   document.getElementById('exportBtn').disabled=false;
   document.getElementById('exportSocialBtn').disabled=false;
-  // Switch to B and update everything
+
+  // Switch to B
   abMode='B';
   document.getElementById('btnA').classList.remove('active');
   document.getElementById('btnB').classList.add('active');
+
+  // Resume audio context so play button works immediately after
+  if(audioCtx&&audioCtx.state==='suspended')audioCtx.resume();
+
+  // Reset position to start
+  pausedAt=0;startedAt=0;
+  document.getElementById('progressFill').style.width='0%';
+  document.getElementById('timeCurrent').textContent='0:00';
+  syncUI();
+
   if(processedBuffer){
     estimateLUFS(processedBuffer,true);
     runAnalysis(processedBuffer,true);
   }
-  showTempMsg('✓ Mix complete — switch A/B to compare');
+  showTempMsg('✓ Mix complete — press play to hear it');
 }
 
 // ══ OFFLINE RENDER — with LUFS targeting ══
